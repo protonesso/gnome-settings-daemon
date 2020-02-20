@@ -80,9 +80,6 @@ gcm_test_night_light (void)
         datetime_override = g_date_time_new_utc (2017, 2, 8, 20, 0, 0);
         gsd_night_light_set_date_time_now (nlight, datetime_override);
 
-        /* do not start geoclue */
-        gsd_night_light_set_geoclue_enabled (nlight, FALSE);
-
         /* do not smooth the transition */
         gsd_night_light_set_smooth_enabled (nlight, FALSE);
 

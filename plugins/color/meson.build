@@ -15,7 +15,6 @@ deps = plugins_deps + [
   gnome_desktop_dep,
   lcms_dep,
   libcanberra_gtk_dep,
-  libgeoclue_dep,
   libnotify_dep,
   m_dep,
 ]

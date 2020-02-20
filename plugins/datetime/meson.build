@@ -20,7 +20,6 @@ sources += gnome.gdbus_codegen(
 deps = plugins_deps + [
   geocode_glib_dep,
   gweather_dep,
-  libgeoclue_dep,
   libnotify_dep,
   m_dep,
   polkit_gobject_dep

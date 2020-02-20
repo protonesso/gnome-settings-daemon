@@ -20,8 +20,6 @@
 
 #include "config.h"
 
-#include <geoclue.h>
-
 #define GNOME_DESKTOP_USE_UNSTABLE_API
 #include "gnome-datetime-source.h"
 
@@ -35,12 +33,8 @@ struct _GsdNightLight {
         GSettings         *settings;
         gboolean           forced;
         gboolean           disabled_until_tmw;
-        GDateTime         *disabled_until_tmw_dt;
-        gboolean           geoclue_enabled;
         GSource           *source;
         guint              validate_id;
-        GClueClient       *geoclue_client;
-        GClueSimple       *geoclue_simple;
         GSettings         *location_settings;
         gdouble            cached_sunrise;
         gdouble            cached_sunset;
@@ -454,91 +448,6 @@ settings_changed_cb (GSettings *settings, gchar *key, gpointer user_data)
         night_light_recheck (self);
 }
 
-static void
-on_location_notify (GClueSimple *simple,
-                    GParamSpec  *pspec,
-                    gpointer     user_data)
-{
-        GsdNightLight *self = GSD_NIGHT_LIGHT (user_data);
-        GClueLocation *location;
-        gdouble latitude, longitude;
-
-        location = gclue_simple_get_location (simple);
-        latitude = gclue_location_get_latitude (location);
-        longitude = gclue_location_get_longitude (location);
-
-        g_settings_set_value (self->settings,
-                              "night-light-last-coordinates",
-                              g_variant_new ("(dd)", latitude, longitude));
-
-        g_debug ("got geoclue latitude %f, longitude %f", latitude, longitude);
-
-        /* recheck the levels if the location changed significantly */
-        if (update_cached_sunrise_sunset (self))
-                night_light_recheck_schedule (self);
-}
-
-static void
-on_geoclue_simple_ready (GObject      *source_object,
-                         GAsyncResult *res,
-                         gpointer      user_data)
-{
-        GsdNightLight *self = GSD_NIGHT_LIGHT (user_data);
-        GClueSimple *geoclue_simple;
-        g_autoptr(GError) error = NULL;
-
-        geoclue_simple = gclue_simple_new_finish (res, &error);
-        if (geoclue_simple == NULL) {
-                if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-                        g_warning ("Failed to connect to GeoClue2 service: %s", error->message);
-                return;
-        }
-
-        self->geoclue_simple = geoclue_simple;
-        self->geoclue_client = gclue_simple_get_client (self->geoclue_simple);
-        g_object_set (G_OBJECT (self->geoclue_client),
-                      "time-threshold", 60*60, NULL); /* 1 hour */
-
-        g_signal_connect (self->geoclue_simple, "notify::location",
-                          G_CALLBACK (on_location_notify), user_data);
-
-        on_location_notify (self->geoclue_simple, NULL, user_data);
-}
-
-static void
-start_geoclue (GsdNightLight *self)
-{
-        self->cancellable = g_cancellable_new ();
-        gclue_simple_new (DESKTOP_ID,
-                          GCLUE_ACCURACY_LEVEL_CITY,
-                          self->cancellable,
-                          on_geoclue_simple_ready,
-                          self);
-
-}
-
-static void
-stop_geoclue (GsdNightLight *self)
-{
-        g_cancellable_cancel (self->cancellable);
-        g_clear_object (&self->cancellable);
-
-        if (self->geoclue_client != NULL) {
-                gclue_client_call_stop (self->geoclue_client, NULL, NULL, NULL);
-                self->geoclue_client = NULL;
-        }
-        g_clear_object (&self->geoclue_simple);
-}
-
-static void
-check_location_settings (GsdNightLight *self)
-{
-        if (g_settings_get_boolean (self->location_settings, "enabled") && self->geoclue_enabled)
-                start_geoclue (self);
-        else
-                stop_geoclue (self);
-}
-
 void
 gsd_night_light_set_disabled_until_tmw (GsdNightLight *self, gboolean value)
 {
@@ -608,12 +517,6 @@ gsd_night_light_get_temperature (GsdNightLight *self)
         return self->cached_temperature;
 }
 
-void
-gsd_night_light_set_geoclue_enabled (GsdNightLight *self, gboolean enabled)
-{
-        self->geoclue_enabled = enabled;
-}
-
 gboolean
 gsd_night_light_start (GsdNightLight *self, GError **error)
 {
@@ -624,10 +527,6 @@ gsd_night_light_start (GsdNightLight *self, GError **error)
         g_signal_connect (self->settings, "changed",
                           G_CALLBACK (settings_changed_cb), self);
 
-        g_signal_connect_swapped (self->location_settings, "changed::enabled",
-                                  G_CALLBACK (check_location_settings), self);
-        check_location_settings (self);
-
         return TRUE;
 }
 
@@ -635,8 +534,6 @@ static void
 gsd_night_light_finalize (GObject *object)
 {
         GsdNightLight *self = GSD_NIGHT_LIGHT (object);
-
-        stop_geoclue (self);
 
         poll_timeout_destroy (self);
         poll_smooth_destroy (self);
@@ -783,7 +680,6 @@ gsd_night_light_class_init (GsdNightLightClass *klass)
 static void
 gsd_night_light_init (GsdNightLight *self)
 {
-        self->geoclue_enabled = TRUE;
         self->smooth_enabled = TRUE;
         self->cached_sunrise = -1.f;
         self->cached_sunset = -1.f;
